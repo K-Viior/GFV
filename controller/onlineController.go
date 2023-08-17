@@ -3,10 +3,10 @@ package controller
 import (
 	"GFV/download"
 	"GFV/utils"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -39,7 +39,7 @@ type preview struct {
 	Type string `json:"type"`
 }
 
-func (oc OnlineController) OnlinePreview(c *gin.Context) {
+func (oc OnlineController) OnlineConvert(c *gin.Context) {
 	requestUrl := c.Query("url")
 	requestType := c.Query("type")
 	filePath := requestUrl[len(Pattern):]
@@ -55,22 +55,24 @@ func (oc OnlineController) OnlinePreview(c *gin.Context) {
 				//若传入文件不是pdf，则进行转换
 				//若文件已存在，则获取缓存的文件
 				if isHavePdf(path.Base(filePath)) {
-					pdfPath := "cache/pdf/" + strings.Split(path.Base(filePath), ".")[0] + ".pdf"
-					dataByte := pdfPage(pdfPath)
-					c.Writer.Header().Set("content-length", strconv.Itoa(len(dataByte)))
-					c.Writer.Header().Set("content-type", "text/html;charset=UTF-8")
-					c.Writer.Write([]byte(dataByte))
+
 					setFileMap(path.Base(filePath))
+					result := map[string]string{
+						"fileName": strings.Split(path.Base(filePath), ".")[0] + ".pdf",
+					}
+					c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "转换成功", "data": result})
 					return
 				}
 				if pdfPath := utils.ConvertToPDF(filePath); pdfPath != "" {
-					dataByte := pdfPage("cache/pdf/" + path.Base(pdfPath))
-					c.Writer.Header().Set("content-length", strconv.Itoa(len(dataByte)))
-					c.Writer.Header().Set("content-type", "text/html;charset=UTF-8")
-					c.Writer.Write([]byte(dataByte))
+
 					setFileMap(path.Base(filePath))
+					result := map[string]string{
+						"fileName": strings.Split(path.Base(filePath), ".")[0] + ".pdf",
+					}
+					c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "转换成功", "data": result})
 				} else {
-					c.Writer.Write([]byte("转换为PDF时出现错误!"))
+					c.JSON(http.StatusBadRequest, gin.H{"code": 201, "msg": "转换为PDF时出现错误!"})
+					return
 				}
 			}
 		} else if utils.IsInArr(path.Ext(filePath), AllImageEtx) {
@@ -79,20 +81,19 @@ func (oc OnlineController) OnlinePreview(c *gin.Context) {
 			c.Writer.Header().Set("content-type", "text/html;charset=UTF-8")
 			c.Writer.Write([]byte(dataByte))
 		} else if utils.IsInArr(path.Ext(filePath), AllOfficeEtx) {
-			if isHave(path.Base(filePath)) {
-				dataByte := officePage("cache/convert/" + strings.Split(path.Base(filePath), ".")[0])
-				c.Writer.Header().Set("content-length", strconv.Itoa(len(dataByte)))
-				c.Writer.Header().Set("content-type", "text/html;charset=UTF-8")
-				c.Writer.Write([]byte(dataByte))
+			if k, v := isHaveImg(path.Base(filePath)); k && v != "" {
+				result := map[string]string{
+					"fileName": v,
+				}
+				c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "转换成功", "data": result})
 				return
 			}
 			if pdfPath := utils.ConvertToPDF(filePath); pdfPath != "" {
 				if imgPath := utils.ConvertToImg(pdfPath); imgPath != "" {
-					dataByte := officePage(imgPath)
-					c.Writer.Header().Set("content-length", strconv.Itoa(len(dataByte)))
-					c.Writer.Header().Set("content-type", "text/html;charset=UTF-8")
-					c.Writer.Write([]byte(dataByte))
-					setFileMap(path.Base(filePath))
+					result := map[string]string{
+						"fileName": path.Base(imgPath),
+					}
+					c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "转换成功", "data": result})
 				} else {
 					c.Writer.Write([]byte("转换为图片时出现错误!"))
 				}
@@ -125,16 +126,49 @@ func (oc OnlineController) OnlinePreview(c *gin.Context) {
 	}
 }
 
-func (oc OnlineController) OfflinePreview(c *gin.Context) {
-	filePath := c.Param("filePath")
-	filePath = c.Query("filePath")
-	fmt.Println(filePath)
-	if isHaveImg(filePath) {
-		dataByte := officePage("cache/convert/" + strings.Split(path.Base(filePath), ".")[0])
+func (oc OnlineController) Preview(c *gin.Context) {
+	fileName := c.Query("fileName")
+	fileType := c.Query("type")
+	if strings.ToLower(fileType) == "pdf" {
+
+	}
+	if k, v := isHaveImg(fileName); k && v != "" {
+		dataByte := officePage("cache/convert/" + strings.Split(path.Base(fileName), ".")[0])
 		c.Writer.Header().Set("content-length", strconv.Itoa(len(dataByte)))
 		c.Writer.Header().Set("content-type", "text/html;charset=UTF-8")
 		c.Writer.Write([]byte(dataByte))
 		return
+	} else {
+		c.JSON(http.StatusBadRequest, "无法找到文件，请检查文件名是否输入正确")
+	}
+}
+
+func (oc OnlineController) LocalConvert(c *gin.Context) {
+	filePath := c.PostForm("filePath")
+	fileMd5 := c.PostForm("MD5")
+	if fileMd5 == "" {
+		fileMd5 = utils.GetFileMD5(filePath)
+	}
+	if k, v := isHaveImg(fileMd5); k && v != "" {
+		result := map[string]string{
+			"fileName": v,
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "转换成功", "data": result})
+		return
+	}
+
+	//filePath = filePath[:len(filePath)-len(path.Base(filePath))] + fileMd5
+	if pdfPath := utils.LocalConvertToPDF(filePath); pdfPath != "" {
+		if imgPath := utils.ConvertToImg(pdfPath); imgPath != "" {
+			result := map[string]string{
+				"fileName": path.Base(imgPath),
+			}
+			c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "转换成功", "data": result})
+		} else {
+			c.Writer.Write([]byte("转换为图片时出现错误!"))
+		}
+	} else {
+		c.Writer.Write([]byte("转换为PDF时出现错误!"))
 	}
 }
 
@@ -253,7 +287,9 @@ func setFileMap(fileName string) {
 		AllFile[fileName] = temp
 	}
 }
-func isHaveImg(fileName string) bool {
+func isHaveImg(fileName string) (bool, string) {
+	ext := path.Ext(fileName)
+	fileName = fileName[0 : len(fileName)-len(ext)]
 	// 指定目录和文件名
 	directory := "cache/convert/"
 	// 使用 filepath 包来生成文件的完整路径
@@ -262,13 +298,13 @@ func isHaveImg(fileName string) bool {
 	_, err := os.Stat(filePath)
 
 	if err == nil {
-		return true
+		return true, fileName
 	} else {
 		if os.IsNotExist(err) {
-			return false
+			return false, ""
 		} else {
 			log.Println("ERROR: 查看文件缓存 ", err)
-			return false
+			return false, ""
 		}
 	}
 }

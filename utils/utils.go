@@ -50,6 +50,35 @@ func ConvertToPDF(filePath string) string {
 	}
 }
 
+func LocalConvertToPDF(filePath string) string {
+	fileMD5 := GetFileMD5(filePath)
+	commandName := ""
+	var params []string
+	if runtime.GOOS == "windows" {
+		commandName = "cmd"
+		params = []string{"/c", "soffice", "--headless", "--invisible", "--convert-to", "pdf", "--outdir", "cache/pdf/", filePath}
+	} else if runtime.GOOS == "linux" {
+		commandName = "libreoffice"
+		params = []string{"--invisible", "--headless", "--convert-to", "pdf", "--outdir", "cache/pdf/", filePath}
+	}
+	if _, ok := interactiveToexec(commandName, params); ok {
+		resultPath := "cache/pdf/" + strings.Split(path.Base(filePath), ".")[0] + ".pdf"
+		newPath := "cache/pdf/" + fileMD5 + ".pdf"
+		err := os.Rename(resultPath, newPath)
+		if err != nil {
+			return ""
+		}
+		if ok, _ := PathExists(newPath); ok {
+			log.Printf("Convert <%s> to pdf\n", path.Base(filePath))
+			return newPath
+		} else {
+			return ""
+		}
+	} else {
+		return ""
+	}
+}
+
 func ConvertToImg(filePath string) string {
 	fileName := strings.Split(path.Base(filePath), ".")[0]
 	//fileDir := path.Dir(filePath)
